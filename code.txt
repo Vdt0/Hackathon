@@ -1,0 +1,132 @@
+#include <Wire.h>
+#include <BH1750.h>
+
+BH1750 lightMeter;
+
+// ---------- PIR / FC51 ----------
+const int sensorPins[4] = {32, 33, 25, 26};
+
+// ---------- Lamps ----------
+const int lampPins[4] = {16, 17, 18, 19};
+
+// ---------- PWM ----------
+const int pwmChannels[4] = {0, 1, 2, 3};
+const int pwmFreq = 5000;
+const int pwmResolution = 8;
+
+// ---------- Brightness ----------
+const int OFF_LEVEL = 0;
+const int DIM_LEVEL = 128;      // 50%
+const int NEIGHBOR_LEVEL = 200; // 80%
+const int FULL_LEVEL = 255;     // 100%
+
+// ---------- Timing ----------
+unsigned long lastMotionTime = 0;
+const unsigned long timeoutMs = 5000;
+
+// ---------- Light threshold ----------
+const float dayThreshold = 80.0;
+
+bool motionDetected = false;
+
+void setLamp(int lamp, int value)
+{
+  ledcWrite(pwmChannels[lamp], value);
+}
+
+void setAllLamps(int value)
+{
+  for(int i = 0; i < 4; i++)
+  {
+    setLamp(i, value);
+  }
+}
+
+void activateZone(int sensorIndex)
+{
+  setAllLamps(DIM_LEVEL);
+
+  setLamp(sensorIndex, FULL_LEVEL);
+
+  if(sensorIndex > 0)
+    setLamp(sensorIndex - 1, NEIGHBOR_LEVEL);
+
+  if(sensorIndex < 3)
+    setLamp(sensorIndex + 1, NEIGHBOR_LEVEL);
+
+  lastMotionTime = millis();
+  motionDetected = true;
+}
+
+void setup()
+{
+  Serial.begin(115200);
+
+  Wire.begin(21, 22);
+  lightMeter.begin();
+
+  for(int i = 0; i < 4; i++)
+  {
+    pinMode(sensorPins[i], INPUT);
+
+    ledcSetup(
+      pwmChannels[i],
+      pwmFreq,
+      pwmResolution
+    );
+
+    ledcAttachPin(
+      lampPins[i],
+      pwmChannels[i]
+    );
+  }
+
+  setAllLamps(DIM_LEVEL);
+
+  Serial.println("System started");
+}
+
+void loop()
+{
+  float lux = lightMeter.readLightLevel();
+
+  Serial.print("Lux: ");
+  Serial.println(lux);
+
+  // Дневен режим
+  if(lux > dayThreshold)
+  {
+    setAllLamps(OFF_LEVEL);
+    delay(200);
+    return;
+  }
+
+  // Нощен режим
+  for(int i = 0; i < 4; i++)
+  {
+    if(digitalRead(sensorPins[i]) == LOW)
+    {
+      activateZone(i);
+
+      Serial.print("Motion sensor ");
+      Serial.println(i + 1);
+
+      delay(100);
+    }
+  }
+
+  if(motionDetected)
+  {
+    if(millis() - lastMotionTime > timeoutMs)
+    {
+      setAllLamps(DIM_LEVEL);
+      motionDetected = false;
+    }
+  }
+  else
+  {
+    setAllLamps(DIM_LEVEL);
+  }
+
+  delay(50);
+}
